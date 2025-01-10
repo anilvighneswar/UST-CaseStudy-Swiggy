@@ -1,0 +1,803 @@
+{
+    "name": "Swiggy_Pipeline",
+    "properties": {
+        "activities": [
+            {
+                "name": "HttpToDatalake",
+                "type": "Copy",
+                "dependsOn": [
+                    {
+                        "activity": "StartLog",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "JsonSource",
+                        "storeSettings": {
+                            "type": "HttpReadSettings",
+                            "requestMethod": "GET"
+                        },
+                        "formatSettings": {
+                            "type": "JsonReadSettings"
+                        }
+                    },
+                    "sink": {
+                        "type": "JsonSink",
+                        "storeSettings": {
+                            "type": "AzureBlobStorageWriteSettings"
+                        },
+                        "formatSettings": {
+                            "type": "JsonWriteSettings"
+                        }
+                    },
+                    "enableStaging": false
+                },
+                "inputs": [
+                    {
+                        "referenceName": "Json1",
+                        "type": "DatasetReference"
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "Json2",
+                        "type": "DatasetReference"
+                    }
+                ]
+            },
+            {
+                "name": "BronzeToSilver",
+                "type": "DatabricksNotebook",
+                "dependsOn": [
+                    {
+                        "activity": "HttpToDatalake",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "notebookPath": "/Users/vickycstudy@outlook.com/Bronze->Silver"
+                },
+                "linkedServiceName": {
+                    "referenceName": "AzureDatabricksLs",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "SilverToGold",
+                "type": "DatabricksNotebook",
+                "dependsOn": [
+                    {
+                        "activity": "BronzeToSilver",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "notebookPath": "/Users/vickycstudy@outlook.com/Silver->Gold"
+                },
+                "linkedServiceName": {
+                    "referenceName": "AzureDatabricksLs",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "SQLrequirements",
+                "type": "DatabricksNotebook",
+                "dependsOn": [
+                    {
+                        "activity": "SilverToGold",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "notebookPath": "/Users/vickycstudy@outlook.com/SQL Requirements"
+                },
+                "linkedServiceName": {
+                    "referenceName": "AzureDatabricksLs",
+                    "type": "LinkedServiceReference"
+                }
+            },
+            {
+                "name": "Http Log",
+                "type": "Copy",
+                "dependsOn": [
+                    {
+                        "activity": "HttpToDatalake",
+                        "dependencyConditions": [
+                            "Completed"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "SqlServerSource",
+                        "sqlReaderQuery": {
+                            "value": "SELECT\n    NEWID() AS Id,                                    -- Generate unique ID\n    '@{pipeline().RunId}' AS Process_Id,              -- Pipeline run ID\n    '@{pipeline().Pipeline}' AS Process_Name,         -- Pipeline name\n    'Http To Datalake' AS Activity_Name,                -- Name of the activity\n   \n    '@{activity('HttpToDatalake').ExecutionStartTime}' AS Start_Time,        -- Pipeline start time\n    '@{utcNow()}' AS End_Time,                        -- Pipeline end time\n    CASE\n        WHEN '@{activity('HttpToDatalake').Status}' = 'Failed' THEN 'Failure'\n        ELSE 'Success'\n    END AS Status,                                    -- Execution status\n    CASE\n        WHEN '@{activity('HttpToDatalake').Status}' = 'Failed' THEN\n            '@{if(not(equals(activity('HttpToDatalake').Error, null)), activity('HttpToDatalake').Error.errorCode, '')}'\n        ELSE NULL\n    END AS Error_Code,                                -- Error code of the failed activity (NULL for success)\n    CASE\n        WHEN '@{activity('HttpToDatalake').Status}' = 'Failed' THEN\n            '@{if(not(equals(activity('HttpToDatalake').Error, null)), replace(activity('HttpToDatalake').Error.message, '''', ''), '')}'\n        ELSE 'Execution successful'\n    END AS Error_Message,                             -- Error message (success message for successful execution)\n    '@{utcNow()}' AS Log_Time                         -- Log timestamp",
+                            "type": "Expression"
+                        },
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "sink": {
+                        "type": "SqlServerSink",
+                        "writeBehavior": "insert",
+                        "sqlWriterUseTableLock": false
+                    },
+                    "enableStaging": false,
+                    "translator": {
+                        "type": "TabularTranslator",
+                        "mappings": [
+                            {
+                                "source": {
+                                    "name": "Id",
+                                    "type": "Guid",
+                                    "physicalType": "uniqueidentifier"
+                                },
+                                "sink": {
+                                    "name": "Id",
+                                    "type": "Guid",
+                                    "physicalType": "uniqueidentifier"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "Process_Id",
+                                    "type": "String",
+                                    "physicalType": "varchar"
+                                },
+                                "sink": {
+                                    "name": "Process_Id",
+                                    "type": "String",
+                                    "physicalType": "nvarchar"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "Process_Name",
+                                    "type": "String",
+                                    "physicalType": "varchar"
+                                },
+                                "sink": {
+                                    "name": "Process_Name",
+                                    "type": "String",
+                                    "physicalType": "nvarchar"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "Activity_Name",
+                                    "type": "String",
+                                    "physicalType": "varchar"
+                                },
+                                "sink": {
+                                    "name": "Activity_Name",
+                                    "type": "String",
+                                    "physicalType": "nvarchar"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "Start_Time",
+                                    "type": "String",
+                                    "physicalType": "varchar"
+                                },
+                                "sink": {
+                                    "name": "Start_Time",
+                                    "type": "DateTime",
+                                    "physicalType": "datetime"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "End_Time",
+                                    "type": "String",
+                                    "physicalType": "varchar"
+                                },
+                                "sink": {
+                                    "name": "End_Time",
+                                    "type": "DateTime",
+                                    "physicalType": "datetime"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "Status",
+                                    "type": "String",
+                                    "physicalType": "varchar"
+                                },
+                                "sink": {
+                                    "name": "Status",
+                                    "type": "String",
+                                    "physicalType": "nvarchar"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "Error_Code",
+                                    "type": "String",
+                                    "physicalType": "varchar"
+                                },
+                                "sink": {
+                                    "name": "Error_Code",
+                                    "type": "String",
+                                    "physicalType": "nvarchar"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "Error_Message",
+                                    "type": "String",
+                                    "physicalType": "varchar"
+                                },
+                                "sink": {
+                                    "name": "Error_Message",
+                                    "type": "String",
+                                    "physicalType": "nvarchar"
+                                }
+                            },
+                            {
+                                "source": {
+                                    "name": "Log_Time",
+                                    "type": "String",
+                                    "physicalType": "varchar"
+                                },
+                                "sink": {
+                                    "name": "Log_Time",
+                                    "type": "DateTime",
+                                    "physicalType": "datetime"
+                                }
+                            }
+                        ],
+                        "typeConversion": true,
+                        "typeConversionSettings": {
+                            "allowDataTruncation": true,
+                            "treatBooleanAsNumber": false
+                        }
+                    }
+                },
+                "inputs": [
+                    {
+                        "referenceName": "SqlServerTable1",
+                        "type": "DatasetReference"
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "SqlServerLogTable",
+                        "type": "DatasetReference"
+                    }
+                ]
+            },
+            {
+                "name": "BtoSLog",
+                "type": "Copy",
+                "dependsOn": [
+                    {
+                        "activity": "BronzeToSilver",
+                        "dependencyConditions": [
+                            "Completed"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "SqlServerSource",
+                        "sqlReaderQuery": {
+                            "value": "SELECT\n    NEWID() AS Id,                                    -- Generate unique ID\n    '@{pipeline().RunId}' AS Process_Id,              -- Pipeline run ID\n    '@{pipeline().Pipeline}' AS Process_Name,         -- Pipeline name\n    'Bronze To Silver' AS Activity_Name,                -- Name of the activity\n   \n    '@{activity('BronzeToSilver').ExecutionStartTime}' AS Start_Time,        -- Pipeline start time\n    '@{utcNow()}' AS End_Time,                        -- Pipeline end time\n    CASE\n        WHEN '@{activity('BronzeToSilver').Status}' = 'Failed' THEN 'Failure'\n        ELSE 'Success'\n    END AS Status,                                    -- Execution status\n    CASE\n        WHEN '@{activity('BronzeToSilver').Status}' = 'Failed' THEN\n            '@{if(not(equals(activity('BronzeToSilver').Error, null)), activity('BronzeToSilver').Error.errorCode, '')}'\n        ELSE NULL\n    END AS Error_Code,                                -- Error code of the failed activity (NULL for success)\n    CASE\n        WHEN '@{activity('BronzeToSilver').Status}' = 'Failed' THEN\n            '@{if(not(equals(activity('BronzeToSilver').Error, null)), replace(activity('BronzeToSilver').Error.message, '''', ''), '')}'\n        ELSE 'Execution successful'\n    END AS Error_Message,                             -- Error message (success message for successful execution)\n    '@{utcNow()}' AS Log_Time                         -- Log timestamp",
+                            "type": "Expression"
+                        },
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "sink": {
+                        "type": "SqlServerSink",
+                        "writeBehavior": "insert",
+                        "sqlWriterUseTableLock": false
+                    },
+                    "enableStaging": false,
+                    "translator": {
+                        "type": "TabularTranslator",
+                        "typeConversion": true,
+                        "typeConversionSettings": {
+                            "allowDataTruncation": true,
+                            "treatBooleanAsNumber": false
+                        }
+                    }
+                },
+                "inputs": [
+                    {
+                        "referenceName": "SqlServerTable1",
+                        "type": "DatasetReference"
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "SqlServerLogTable",
+                        "type": "DatasetReference"
+                    }
+                ]
+            },
+            {
+                "name": "StoGLog",
+                "type": "Copy",
+                "dependsOn": [
+                    {
+                        "activity": "SilverToGold",
+                        "dependencyConditions": [
+                            "Completed"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "SqlServerSource",
+                        "sqlReaderQuery": {
+                            "value": "SELECT\n    NEWID() AS Id,                                    -- Generate unique ID\n    '@{pipeline().RunId}' AS Process_Id,              -- Pipeline run ID\n    '@{pipeline().Pipeline}' AS Process_Name,         -- Pipeline name\n    'Silver To Gold' AS Activity_Name,                -- Name of the activity\n   \n    '@{activity('SilverToGold').ExecutionStartTime}' AS Start_Time,        -- Pipeline start time\n    '@{utcNow()}' AS End_Time,                        -- Pipeline end time\n    CASE\n        WHEN '@{activity('SilverToGold').Status}' = 'Failed' THEN 'Failure'\n        ELSE 'Success'\n    END AS Status,                                    -- Execution status\n    CASE\n        WHEN '@{activity('SilverToGold').Status}' = 'Failed' THEN\n            '@{if(not(equals(activity('SilverToGold').Error, null)), activity('SilverToGold').Error.errorCode, '')}'\n        ELSE NULL\n    END AS Error_Code,                                -- Error code of the failed activity (NULL for success)\n    CASE\n        WHEN '@{activity('SilverToGold').Status}' = 'Failed' THEN\n            '@{if(not(equals(activity('SilverToGold').Error, null)), replace(activity('SilverToGold').Error.message, '''', ''), '')}'\n        ELSE 'Execution successful'\n    END AS Error_Message,                             -- Error message (success message for successful execution)\n    '@{utcNow()}' AS Log_Time                         -- Log timestamp",
+                            "type": "Expression"
+                        },
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "sink": {
+                        "type": "SqlServerSink",
+                        "writeBehavior": "insert",
+                        "sqlWriterUseTableLock": false
+                    },
+                    "enableStaging": false,
+                    "translator": {
+                        "type": "TabularTranslator",
+                        "typeConversion": true,
+                        "typeConversionSettings": {
+                            "allowDataTruncation": true,
+                            "treatBooleanAsNumber": false
+                        }
+                    }
+                },
+                "inputs": [
+                    {
+                        "referenceName": "SqlServerTable1",
+                        "type": "DatasetReference"
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "SqlServerLogTable",
+                        "type": "DatasetReference"
+                    }
+                ]
+            },
+            {
+                "name": "SqlReqLog",
+                "type": "Copy",
+                "dependsOn": [
+                    {
+                        "activity": "SQLrequirements",
+                        "dependencyConditions": [
+                            "Completed"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "SqlServerSource",
+                        "sqlReaderQuery": {
+                            "value": "SELECT\n    NEWID() AS Id,                                    -- Generate unique ID\n    '@{pipeline().RunId}' AS Process_Id,              -- Pipeline run ID\n    '@{pipeline().Pipeline}' AS Process_Name,         -- Pipeline name\n    'SQL requirements' AS Activity_Name,                -- Name of the activity\n   \n    '@{activity('SQLrequirements').ExecutionStartTime}' AS Start_Time,        -- Pipeline start time\n    '@{utcNow()}' AS End_Time,                        -- Pipeline end time\n    CASE\n        WHEN '@{activity('SQLrequirements').Status}' = 'Failed' THEN 'Failure'\n        ELSE 'Success'\n    END AS Status,                                    -- Execution status\n    CASE\n        WHEN '@{activity('SQLrequirements').Status}' = 'Failed' THEN\n            '@{if(not(equals(activity('SQLrequirements').Error, null)), activity('SQLrequirements').Error.errorCode, '')}'\n        ELSE NULL\n    END AS Error_Code,                                -- Error code of the failed activity (NULL for success)\n    CASE\n        WHEN '@{activity('SQLrequirements').Status}' = 'Failed' THEN\n            '@{if(not(equals(activity('SQLrequirements').Error, null)), replace(activity('SQLrequirements').Error.message, '''', ''), '')}'\n        ELSE 'Execution successful'\n    END AS Error_Message,                             -- Error message (success message for successful execution)\n    '@{utcNow()}' AS Log_Time                         -- Log timestamp",
+                            "type": "Expression"
+                        },
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "sink": {
+                        "type": "SqlServerSink",
+                        "writeBehavior": "insert",
+                        "sqlWriterUseTableLock": false
+                    },
+                    "enableStaging": false,
+                    "translator": {
+                        "type": "TabularTranslator",
+                        "typeConversion": true,
+                        "typeConversionSettings": {
+                            "allowDataTruncation": true,
+                            "treatBooleanAsNumber": false
+                        }
+                    }
+                },
+                "inputs": [
+                    {
+                        "referenceName": "SqlServerTable1",
+                        "type": "DatasetReference"
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "SqlServerLogTable",
+                        "type": "DatasetReference"
+                    }
+                ]
+            },
+            {
+                "name": "EndLog",
+                "type": "Copy",
+                "dependsOn": [
+                    {
+                        "activity": "DeleteLog",
+                        "dependencyConditions": [
+                            "Completed"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "SqlServerSource",
+                        "sqlReaderQuery": {
+                            "value": "SELECT\n    NEWID() AS Id,                                    -- Generate unique ID\n    '@{pipeline().RunId}' AS Process_Id,              -- Pipeline run ID\n    '@{pipeline().Pipeline}' AS Process_Name,         -- Pipeline name\n    'Pipeline Run End' AS Activity_Name,                -- Name of the activity\n   \n    '@{utcNow()}' AS Start_Time,        -- Pipeline start time\n    '@{utcNow()}' AS End_Time,                        -- Pipeline end time\n    'Pipeline Ended' AS Status,                                    -- Execution status\n    NULL AS Error_Code,                                -- Error code of the failed activity (NULL for success)\n    'Pipeline run completed.' AS Error_Message,                             -- Error message (success message for successful execution)\n    '@{utcNow()}' AS Log_Time                         -- Log timestamp",
+                            "type": "Expression"
+                        },
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "sink": {
+                        "type": "SqlServerSink",
+                        "writeBehavior": "insert",
+                        "sqlWriterUseTableLock": false
+                    },
+                    "enableStaging": false,
+                    "translator": {
+                        "type": "TabularTranslator",
+                        "typeConversion": true,
+                        "typeConversionSettings": {
+                            "allowDataTruncation": true,
+                            "treatBooleanAsNumber": false
+                        }
+                    }
+                },
+                "inputs": [
+                    {
+                        "referenceName": "SqlServerTable1",
+                        "type": "DatasetReference"
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "SqlServerLogTable",
+                        "type": "DatasetReference"
+                    }
+                ]
+            },
+            {
+                "name": "StartLog",
+                "type": "Copy",
+                "dependsOn": [],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "SqlServerSource",
+                        "sqlReaderQuery": {
+                            "value": "SELECT\n    NEWID() AS Id,                                    -- Generate unique ID\n    '@{pipeline().RunId}' AS Process_Id,              -- Pipeline run ID\n    '@{pipeline().Pipeline}' AS Process_Name,         -- Pipeline name\n    'Pipeline Start' AS Activity_Name,                -- Name of the activity\n   \n    '@{pipeline().TriggerTime}' AS Start_Time,        -- Pipeline start time\n    '@{utcNow()}' AS End_Time,                        -- Pipeline end time\n    'Pipeline Starts'AS Status,                                    -- Execution status\n    NULL AS Error_Code,                                -- Error code of the failed activity (NULL for success)\n    'Pipeline Started' AS Error_Message,                             -- Error message (success message for successful execution)\n    '@{utcNow()}' AS Log_Time                         -- Log timestamp",
+                            "type": "Expression"
+                        },
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "sink": {
+                        "type": "SqlServerSink",
+                        "writeBehavior": "insert",
+                        "sqlWriterUseTableLock": false
+                    },
+                    "enableStaging": false,
+                    "translator": {
+                        "type": "TabularTranslator",
+                        "typeConversion": true,
+                        "typeConversionSettings": {
+                            "allowDataTruncation": true,
+                            "treatBooleanAsNumber": false
+                        }
+                    }
+                },
+                "inputs": [
+                    {
+                        "referenceName": "SqlServerTable1",
+                        "type": "DatasetReference"
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "SqlServerLogTable",
+                        "type": "DatasetReference"
+                    }
+                ]
+            },
+            {
+                "name": "ArchiveLog",
+                "type": "Copy",
+                "dependsOn": [
+                    {
+                        "activity": "Archive",
+                        "dependencyConditions": [
+                            "Completed"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "SqlServerSource",
+                        "sqlReaderQuery": {
+                            "value": "SELECT\n    NEWID() AS Id,                                    -- Generate unique ID\n    '@{pipeline().RunId}' AS Process_Id,              -- Pipeline run ID\n    '@{pipeline().Pipeline}' AS Process_Name,         -- Pipeline name\n    'Archive Source' AS Activity_Name,                -- Name of the activity\n   \n    '@{activity('Archive').ExecutionStartTime}' AS Start_Time,        -- Pipeline start time\n    '@{utcNow()}' AS End_Time,                        -- Pipeline end time\n    CASE\n        WHEN '@{activity('Archive').Status}' = 'Failed' THEN 'Failure'\n        ELSE 'Success'\n    END AS Status,                                    -- Execution status\n    CASE\n        WHEN '@{activity('Archive').Status}' = 'Failed' THEN\n            '@{if(not(equals(activity('Archive').Error, null)), activity('Archive').Error.errorCode, '')}'\n        ELSE NULL\n    END AS Error_Code,                                -- Error code of the failed activity (NULL for success)\n    CASE\n        WHEN '@{activity('Archive').Status}' = 'Failed' THEN\n            '@{if(not(equals(activity('Archive').Error, null)), replace(activity('Archive').Error.message, '''', ''), '')}'\n        ELSE 'Execution successful'\n    END AS Error_Message,                             -- Error message (success message for successful execution)\n    '@{utcNow()}' AS Log_Time                         -- Log timestamp",
+                            "type": "Expression"
+                        },
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "sink": {
+                        "type": "SqlServerSink",
+                        "writeBehavior": "insert",
+                        "sqlWriterUseTableLock": false
+                    },
+                    "enableStaging": false,
+                    "translator": {
+                        "type": "TabularTranslator",
+                        "typeConversion": true,
+                        "typeConversionSettings": {
+                            "allowDataTruncation": true,
+                            "treatBooleanAsNumber": false
+                        }
+                    }
+                },
+                "inputs": [
+                    {
+                        "referenceName": "SqlServerTable1",
+                        "type": "DatasetReference"
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "SqlServerLogTable",
+                        "type": "DatasetReference"
+                    }
+                ]
+            },
+            {
+                "name": "Archive",
+                "type": "Copy",
+                "dependsOn": [
+                    {
+                        "activity": "SQLrequirements",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "JsonSource",
+                        "storeSettings": {
+                            "type": "AzureBlobStorageReadSettings",
+                            "recursive": true,
+                            "enablePartitionDiscovery": false
+                        },
+                        "formatSettings": {
+                            "type": "JsonReadSettings"
+                        }
+                    },
+                    "sink": {
+                        "type": "JsonSink",
+                        "storeSettings": {
+                            "type": "AzureBlobFSWriteSettings"
+                        },
+                        "formatSettings": {
+                            "type": "JsonWriteSettings"
+                        }
+                    },
+                    "enableStaging": false
+                },
+                "inputs": [
+                    {
+                        "referenceName": "Json2",
+                        "type": "DatasetReference"
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "Json3",
+                        "type": "DatasetReference"
+                    }
+                ]
+            },
+            {
+                "name": "DeleteSource",
+                "type": "Delete",
+                "dependsOn": [
+                    {
+                        "activity": "Archive",
+                        "dependencyConditions": [
+                            "Succeeded"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "dataset": {
+                        "referenceName": "Json2",
+                        "type": "DatasetReference"
+                    },
+                    "enableLogging": false,
+                    "storeSettings": {
+                        "type": "AzureBlobStorageReadSettings",
+                        "recursive": true,
+                        "enablePartitionDiscovery": false
+                    }
+                }
+            },
+            {
+                "name": "DeleteLog",
+                "type": "Copy",
+                "dependsOn": [
+                    {
+                        "activity": "DeleteSource",
+                        "dependencyConditions": [
+                            "Completed"
+                        ]
+                    }
+                ],
+                "policy": {
+                    "timeout": "0.12:00:00",
+                    "retry": 0,
+                    "retryIntervalInSeconds": 30,
+                    "secureOutput": false,
+                    "secureInput": false
+                },
+                "userProperties": [],
+                "typeProperties": {
+                    "source": {
+                        "type": "SqlServerSource",
+                        "sqlReaderQuery": {
+                            "value": "SELECT\n    NEWID() AS Id,                                    -- Generate unique ID\n    '@{pipeline().RunId}' AS Process_Id,              -- Pipeline run ID\n    '@{pipeline().Pipeline}' AS Process_Name,         -- Pipeline name\n    'Delete Source' AS Activity_Name,                -- Name of the activity\n   \n    '@{activity('DeleteSource').ExecutionStartTime}' AS Start_Time,        -- Pipeline start time\n    '@{utcNow()}' AS End_Time,                        -- Pipeline end time\n    CASE\n        WHEN '@{activity('DeleteSource').Status}' = 'Failed' THEN 'Failure'\n        ELSE 'Success'\n    END AS Status,                                    -- Execution status\n    CASE\n        WHEN '@{activity('DeleteSource').Status}' = 'Failed' THEN\n            '@{if(not(equals(activity('DeleteSource').Error, null)), activity('DeleteSource').Error.errorCode, '')}'\n        ELSE NULL\n    END AS Error_Code,                                -- Error code of the failed activity (NULL for success)\n    CASE\n        WHEN '@{activity('DeleteSource').Status}' = 'Failed' THEN\n            '@{if(not(equals(activity('DeleteSource').Error, null)), replace(activity('DeleteSource').Error.message, '''', ''), '')}'\n        ELSE 'Execution successful'\n    END AS Error_Message,                             -- Error message (success message for successful execution)\n    '@{utcNow()}' AS Log_Time                         -- Log timestamp",
+                            "type": "Expression"
+                        },
+                        "queryTimeout": "02:00:00",
+                        "partitionOption": "None"
+                    },
+                    "sink": {
+                        "type": "SqlServerSink",
+                        "writeBehavior": "insert",
+                        "sqlWriterUseTableLock": false
+                    },
+                    "enableStaging": false,
+                    "translator": {
+                        "type": "TabularTranslator",
+                        "typeConversion": true,
+                        "typeConversionSettings": {
+                            "allowDataTruncation": true,
+                            "treatBooleanAsNumber": false
+                        }
+                    }
+                },
+                "inputs": [
+                    {
+                        "referenceName": "SqlServerTable1",
+                        "type": "DatasetReference"
+                    }
+                ],
+                "outputs": [
+                    {
+                        "referenceName": "SqlServerLogTable",
+                        "type": "DatasetReference"
+                    }
+                ]
+            }
+        ],
+        "annotations": [],
+        "lastPublishTime": "2025-01-01T12:02:52Z"
+    },
+    "type": "Microsoft.DataFactory/factories/pipelines"
+}
